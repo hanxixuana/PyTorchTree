@@ -37,19 +37,19 @@ def search_optimal_split(data, target, pct_ignoring_for_two_side=0.6):
 
     import torch
     import numpy as np
-    import build_tree as bt
+    import ptt
 
     # gpu
     data = torch.cuda.FloatTensor(500, 90000).normal_()
     coefficients = torch.cuda.FloatTensor(90000, 1).normal_()
     target = data.mm(coefficients)
-    %timeit bt.search_optimal_split(data, target)
+    %timeit ptt.search_optimal_split(data, target)
 
     # cpu
     data = torch.FloatTensor(500, 90000).normal_()
     coefficients = torch.FloatTensor(90000, 1).normal_()
     target = data.mm(coefficients)
-    %timeit bt.search_optimal_split(data, target)
+    %timeit ptt.search_optimal_split(data, target)
 
     """
     n_row = data.size(0)
@@ -228,30 +228,26 @@ def build_tree(tree_info, tree_pred, data, target, depth_idx, max_depth, node_id
 
     import torch
     import numpy as np
-    import build_tree as bt
+    import ptt
 
     # gpu
     data = torch.cuda.FloatTensor(500, 90000).normal_()
     coefficients = torch.cuda.FloatTensor(90000, 1).normal_()
     target = data.mm(coefficients)
-
     max_depth = 4
     tree_info = torch.cuda.FloatTensor(2 ** max_depth - 1, 5)
     tree_pred = torch.cuda.FloatTensor(2 ** max_depth)
-
-    %timeit bt.build_tree(tree_info, tree_pred, data, target, 0, max_depth, 0)
+    %timeit ptt.build_tree(tree_info, tree_pred, data, target, 0, max_depth, 0)
 
     # cpu
     torch.set_num_threads(12)
     data = torch.FloatTensor(500, 90000).normal_()
     coefficients = torch.FloatTensor(90000, 1).normal_()
     target = data.mm(coefficients)
-
     max_depth = 4
     tree_info = torch.FloatTensor(2 ** max_depth - 1, 5)
     tree_pred = torch.FloatTensor(2 ** max_depth)
-
-    %timeit bt.build_tree(tree_info, tree_pred, data, target, 0, max_depth, 0)
+    %timeit ptt.build_tree(tree_info, tree_pred, data, target, 0, max_depth, 0)
 
     """
 
@@ -326,10 +322,12 @@ def build_tree(tree_info, tree_pred, data, target, depth_idx, max_depth, node_id
 def forward_tree(x, tree_info, tree_pred):
     """
     Pass through the tree parallelly for samples.
+
     :param torch.FloatTensor x:         2D FloatTensor of [n_sample, n_feature]
     :param torch.FloatTensor tree_info: [n ^ max_depth - 1, 5]
     :param torch.FloatTensor tree_pred: [n ^ max_depth, ]
     :return torch.FloatTensor result:   2D FloatTensor of [n_sample, 1]
+
     """
     row_depth = x.new(x.size(0)).long()
     row_depth.fill_(0)
@@ -363,6 +361,7 @@ def init_tree(max_depth, device_idx=-1):
     """
     Initialize torch.FloatTensor tree_info of [n ^ max_depth - 1, 5]
     and torch.FloatTensor tree_pred of [n ^ max_depth, ].
+
     :param int max_depth:   max depth
     :param int device_idx:  device index
     :return list:           [tree_info, tree_pred]
@@ -376,10 +375,8 @@ def init_tree(max_depth, device_idx=-1):
         0               1           2       3           4
         split_feature   split_value leaf    left_node   right_node
     0   x               x_0         False   1           2
-
     1   y               y_1         False   3           4
     2   z               z_2         False   5           6
-
     3   x               x_3         True    0           1
     4   y               y_4         True    2           3
     5   x               x_5         True    4           5
@@ -429,7 +426,7 @@ def test(seed=0, make_figure=True):
 
     max_depth = 8
     n_feature = 2
-    n_sample = 1000
+    n_sample = 2000
     gpu_idx = 0
 
     data = torch.cuda.FloatTensor(n_sample, n_feature, device=gpu_idx).normal_()
