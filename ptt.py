@@ -427,9 +427,9 @@ def test(seed=0, make_figure=True):
     torch.cuda.manual_seed(seed)
     np.random.seed(seed)
 
-    max_depth = 4
+    max_depth = 8
     n_feature = 2
-    n_sample = 500
+    n_sample = 1000
     gpu_idx = 0
 
     data = torch.cuda.FloatTensor(n_sample, n_feature, device=gpu_idx).normal_()
