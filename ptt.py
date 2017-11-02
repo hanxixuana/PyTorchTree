@@ -430,9 +430,9 @@ def test(seed=0, make_figure=True):
     max_depth = 4
     n_feature = 2
     n_sample = 500
-    cuda_idx = 0
+    gpu_idx = 0
 
-    data = torch.cuda.FloatTensor(n_sample, n_feature, device=cuda_idx).normal_()
+    data = torch.cuda.FloatTensor(n_sample, n_feature, device=gpu_idx).normal_()
     target = (
         (
             data - data.new(1, data.size(1)).normal_().div_(100.0).expand_as(data)
@@ -442,7 +442,7 @@ def test(seed=0, make_figure=True):
         target.new(target.size()).normal_() / 10.0
     )
 
-    tree_info, tree_pred = init_tree(max_depth, cuda_idx)
+    tree_info, tree_pred = init_tree(max_depth, gpu_idx)
 
     build_tree(tree_info, tree_pred, data, target, 0, max_depth, 0)
 
