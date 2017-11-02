@@ -7,10 +7,10 @@ The functions as a whole give a solution to fitting a complete regression binary
 3. use forward_tree to make predictions
 """
 
-__author__ = "Xixuan Han"
-__copyright__ = "Copyright (C) 2017 Xixuan Han"
-__license__ = "MIT License"
-__version__ = "1.0"
+__author__ = 'Xixuan Han'
+__copyright__ = 'Copyright (C) 2017 Xixuan Han'
+__license__ = 'MIT License'
+__version__ = '1.0'
 __print_split_info__ = False
 
 import torch
