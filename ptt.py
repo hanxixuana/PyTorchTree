@@ -4,7 +4,7 @@
 The functions as a whole give a solution to fitting a complete regression binary tree only using PyTorch tensors.
 1. use init_tree to make two tensors to hold the tree split information and predictions at tree leaves
 2. use build_tree to fill the two tensors from init_tree
-3. use forward_tree to make predictions
+3. use forward_tree or parallel_forward_tree to make predictions
 """
 
 __author__ = 'Xixuan Han'
@@ -216,8 +216,8 @@ def build_tree(tree_info, tree_pred, data, target, depth_idx, max_depth, node_id
     """
     Build a tree to tree_info and tree_pred.
 
-    :param torch.FloatTensor tree_info:     [n ^ max_depth - 1, 5]
-    :param torch.FloatTensor tree_pred:     [n ^ max_depth, ]
+    :param torch.FloatTensor tree_info:     [2 ^ max_depth - 1, 5]
+    :param torch.FloatTensor tree_pred:     [2 ^ max_depth, ]
     :param torch.FloatTensor data:          [n_sample, n_feature]
     :param torch.FloatTensor target:        [n_sample, 1]
     :param int depth_idx:                   depth index
@@ -324,15 +324,34 @@ def forward_tree(x, tree_info, tree_pred):
     Pass through the tree parallelly for samples.
 
     :param torch.FloatTensor x:         2D FloatTensor of [n_sample, n_feature]
-    :param torch.FloatTensor tree_info: [n ^ max_depth - 1, 5]
-    :param torch.FloatTensor tree_pred: [n ^ max_depth, ]
-    :return torch.FloatTensor result:   2D FloatTensor of [n_sample, 1]
+    :param torch.FloatTensor tree_info: [2 ^ max_depth - 1, 5]
+    :param torch.FloatTensor tree_pred: [2 ^ max_depth, ]
+    :return list:                       [
+                                            torch.FloatTensor of [n_sample, 1],
+                                            torch.LongTensor of [n_sample, ]
+                                        ]
+
+    Example:
+
+    import torch
+    import numpy as np
+    import ptt
+
+    # gpu
+    data = torch.cuda.FloatTensor(500, 90000).normal_()
+    coefficients = torch.cuda.FloatTensor(90000, 1).normal_()
+    target = data.mm(coefficients)
+    max_depth = 4
+    tree_info, tree_pred = ptt.init_tree(max_depth, 0)
+    ptt.build_tree(tree_info, tree_pred, data, target, 0, max_depth, 0)
+
+    pred, leaf = ptt.forward_tree(data, tree_info, tree_pred)
 
     """
     row_depth = x.new(x.size(0)).long()
     row_depth.fill_(0)
 
-    max_depth = np.log2(tree_pred.size(0)).__long__()
+    max_depth = np.log2(tree_pred.size(0)).__int__()
 
     for depth_idx in xrange(max_depth):
         split_feature_idx = torch.gather(tree_info[:, 0], 0, row_depth).unsqueeze(1).long()
@@ -357,10 +376,173 @@ def forward_tree(x, tree_info, tree_pred):
     ]
 
 
+def parallel_forward_tree(x, tree_info_list, tree_pred_list):
+    """
+    Pass through the trees of the same depth parallelly for samples parallelly.
+
+    :param torch.FloatTensor x:     2D FloatTensor of [n_sample, n_feature]
+    :param list tree_info_list:     a list of n_tree torch.FloatTensor
+                                    [2 ^ max_depth - 1, 5]
+    :param list tree_pred_list:     a list of n_tree torch.FloatTensor
+                                    [2 ^ max_depth, ]
+    :return list:                   [
+                                        torch.FloatTensor of [n_sample, n_tree],
+                                        torch.LongTensor of [n_sample, n_tree]
+                                    ]
+
+    Example:
+
+    import torch
+    import ptt
+    import time
+
+    # gpu
+    data = torch.cuda.FloatTensor(500, 900).normal_()
+
+    def generate_tree(data):
+        coefficients = torch.cuda.FloatTensor(900, 1).normal_()
+        target = data.mm(coefficients)
+        max_depth = 4
+        tree_info, tree_pred = ptt.init_tree(max_depth, 0)
+        ptt.build_tree(tree_info, tree_pred, data, target, 0, max_depth, 0)
+        return tree_info, tree_pred
+
+    def generate_tree_list(data, n_tree):
+        tree_info_list = []
+        tree_pred_list = []
+        for tree_idx in xrange(n_tree):
+            start_time = time.time()
+            tree_info, tree_pred = generate_tree(data)
+            print([tree_idx, time.time() - start_time])
+            tree_info_list.append(tree_info)
+            tree_pred_list.append(tree_pred)
+        return tree_info_list, tree_pred_list
+
+    def loop_forward_tree(data, tree_info_list, tree_pred_list):
+        pred_mat = data.new(data.size(0), tree_info_list.__len__())
+        leaf_mat = data.new(data.size(0), tree_info_list.__len__()).long()
+        for tree_idx in xrange(tree_info_list.__len__()):
+            pred, leaf = ptt.forward_tree(
+                data, tree_info_list[tree_idx], tree_pred_list[tree_idx]
+            )
+            pred_mat[:, tree_idx] = pred
+            leaf_mat[:, tree_idx] = leaf
+        return pred_mat, leaf_mat
+
+    n_tree = 1000
+    tree_info_list, tree_pred_list = generate_tree_list(data, n_tree)
+
+    pred_mat_0, leaf_mat_0 = ptt.parallel_forward_tree(data, tree_info_list, tree_pred_list)
+    pred_mat_1, leaf_mat_1 = loop_forward_tree(data, tree_info_list, tree_pred_list)
+
+    print(pred_mat_0.sub(pred_mat_1).abs().sum())
+    print(leaf_mat_0.sub(leaf_mat_1).abs().sum())
+
+    %timeit ptt.forward_tree(data, tree_info_list[0], tree_pred_list[0])
+    %timeit ptt.parallel_forward_tree(data, tree_info_list, tree_pred_list)
+    %timeit loop_forward_tree(data, tree_info_list, tree_pred_list)
+
+    """
+
+    n_tree = tree_info_list.__len__()
+    max_depth = np.log2(tree_pred_list[0].size(0)).__int__()
+
+    tree_split_feature_mat = torch.cat(
+        [
+            tree_info[:, 0].unsqueeze(1) for tree_info in tree_info_list
+        ],
+        1
+    )
+    tree_split_value_mat = torch.cat(
+        [
+            tree_info[:, 1].unsqueeze(1) for tree_info in tree_info_list
+        ],
+        1
+    )
+    tree_left_depth_mat = torch.cat(
+        [
+            tree_info[:, 3].unsqueeze(1) for tree_info in tree_info_list
+        ],
+        1
+    )
+    tree_right_depth_mat = torch.cat(
+        [
+            tree_info[:, 4].unsqueeze(1) for tree_info in tree_info_list
+        ],
+        1
+    )
+    tree_pred_mat = torch.cat(
+        [
+            tree_pred.unsqueeze(1) for tree_pred in tree_pred_list
+        ],
+        1
+    )
+
+    row_depth_mat = x.new(x.size(0), n_tree).long()
+    row_depth_mat.fill_(0)
+
+
+    for depth_idx in xrange(max_depth):
+        split_feature_idx_mat = torch.gather(tree_split_feature_mat, 0, row_depth_mat).long()
+        split_candidate_mat = torch.gather(x, 1, split_feature_idx_mat)
+        split_value_mat = torch.gather(tree_split_value_mat, 0, row_depth_mat)
+        left_depth_mat = torch.gather(tree_left_depth_mat, 0, row_depth_mat)
+        right_depth_mat = torch.gather(tree_right_depth_mat, 0, row_depth_mat)
+
+        row_depth_mat = (
+            (split_candidate_mat <= split_value_mat).float() * left_depth_mat
+            +
+            (split_candidate_mat > split_value_mat).float() * right_depth_mat
+        ).long()
+
+    result = torch.gather(tree_pred_mat, 0, row_depth_mat)
+
+    return [
+        result,
+        row_depth_mat
+    ]
+
+
+def split_feature_and_max_depth(tree_info):
+    """
+    Summarize the split features and the max depth of the tree.
+    :param torch.FloatTensor tree_info: [2 ^ max_depth - 1, 5]
+    :return list:                       [list, int]
+    """
+    split_feature_list = list(
+        set(
+            tree_info[:, 0].int()
+        )
+    )
+    max_depth = int(np.log2(tree_info.size(0) + 1))
+    return [
+        split_feature_list,
+        max_depth
+    ]
+
+
+def pred_leaf_idx_to_dummy_mat(pred_leaf_idx, tree_depth):
+    """
+    Convert an index vector to a matrix of dummy variables indicating the indices.
+    :param torch.LongTensor pred_leaf_idx:  [n_row, ]
+    :param int tree_depth:                  tree depth
+    :return torch.FloatTensor:              [n_row, 2 ^ depth] of 0 or 1
+    """
+    n_row = pred_leaf_idx.size(0)
+    n_leaf = 2 ** tree_depth
+
+    vec = pred_leaf_idx.float().unsqueeze(1).expand(n_row, n_leaf)
+    sub = vec.new(1, n_leaf).fill_(1.0).cumsum(1).sub_(1.0).expand(n_row, n_leaf)
+
+    result = (vec == sub).float()
+
+    return result
+
+
 def init_tree(max_depth, device_idx=-1):
     """
-    Initialize torch.FloatTensor tree_info of [n ^ max_depth - 1, 5]
-    and torch.FloatTensor tree_pred of [n ^ max_depth, ].
+    Initialize torch.FloatTensor tree_info of [2 ^ max_depth - 1, 5]
+    and torch.FloatTensor tree_pred of [2 ^ max_depth, ].
 
     :param int max_depth:   max depth
     :param int device_idx:  device index
