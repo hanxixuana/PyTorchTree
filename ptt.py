@@ -4,7 +4,7 @@
 The functions as a whole give a solution to fitting a complete regression binary tree only using PyTorch tensors.
 1. use init_tree to make two tensors to hold the tree split information and predictions at tree leaves
 2. use build_tree to fill the two tensors from init_tree
-3. use forward_tree or parallel_forward_tree to make predictions
+3. use forward_tree to make predictions
 """
 
 __author__ = 'Xixuan Han'
@@ -120,19 +120,15 @@ def search_optimal_split(data, target, pct_ignoring_for_two_side=0.6):
 
         if row_idx_from_left > 0:
             left_cum_se_per_col.add_(
-                squared_this_row
+                left_cum_sum_per_col.pow(2.0).div_(row_idx_from_left)
                 -
                 (left_cum_sum_per_col + this_row).pow(2.0).div_(row_idx_from_left + 1)
-                +
-                left_cum_sum_per_col.pow(2.0).div_(row_idx_from_left)
             )
         if row_idx_from_right > 0:
             right_cum_se_per_col.sub_(
-                squared_this_row
+                (right_cum_sum_per_col - this_row).pow(2.0).div_(row_idx_from_right)
                 -
                 right_cum_sum_per_col.pow(2.0).div_(row_idx_from_right + 1)
-                +
-                (right_cum_sum_per_col - this_row).pow(2.0).div_(row_idx_from_right)
             )
 
         left_cum_sum_per_col.add_(
